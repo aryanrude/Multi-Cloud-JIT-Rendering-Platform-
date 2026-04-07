@@ -28,7 +28,7 @@ This project presents a production-grade architecture that allows users to dynam
   - **Azure** → Azure NetApp Files
 - Bootstrap Agent reads instance metadata → mounts required software → sets environment variables → sends READY callback
 
-![High-Level Architecture](architecture-diagram.png)
+![High-Level Architecture](diagram-export-3-26-2026-3_14_48-PM.png)
 
 ---
 
@@ -55,8 +55,8 @@ This project presents a production-grade architecture that allows users to dynam
 
 ### Documents
 
-- **[Full Architecture Design Document](assignment-multicloud.pdf)**
-- **[High-Level Architecture Diagram](architecture-diagram.png)**
+- **[Full Architecture Design Document](assignment-multicloud-aryan-katiyar.pdf)**
+- **[High-Level Architecture Diagram](diagram-export-3-26-2026-3_14_48-PM.png)**
 
 ---
 
@@ -75,15 +75,3 @@ Built as a **conceptual DevOps / Cloud Engineering portfolio project** to demons
 
 **Made with ❤️ for learning and portfolio purposes**
 
-⭐ Star this repo if you find it useful!
-
----
-
-Would you like me to:
-- Add a **"PoC / Hands-on"** section (with the EFS Terraform code you can run)?
-- Make it shorter?
-- Add GitHub badges (Terraform, AWS, etc.)?
-
-Just tell me and I’ll update it instantly.  
-
-This version is clean, professional, and looks impressive to recruiters and hiring managers.
