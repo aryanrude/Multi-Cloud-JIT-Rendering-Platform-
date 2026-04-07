@@ -55,7 +55,7 @@ This project presents a production-grade architecture that allows users to dynam
 
 ### Documents
 
-- **[Full Architecture Design Document](document.pdf)**
+- **[Full Architecture Design Document](assignment-multicloud.pdf)**
 - **[High-Level Architecture Diagram](architecture-diagram.png)**
 
 ---
