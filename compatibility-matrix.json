@@ -1,0 +1,30 @@
+{
+  "compatibility_matrix": [
+    {
+      "software": "Maya",
+      "version": "2024",
+      "render_engine": "Arnold",
+      "engine_version": "7.2.3",
+      "allowed_plugins": ["substance", "xgen", "mtoa"],
+      "compatible": true
+    },
+    {
+      "software": "Maya",
+      "version": "2024",
+      "render_engine": "Redshift",
+      "engine_version": "3.5.0",
+      "allowed_plugins": ["rsMaya"],
+      "compatible": true
+    },
+    {
+      "software": "3ds Max",
+      "version": "2025",
+      "render_engine": "V-Ray",
+      "engine_version": "6.0",
+      "allowed_plugins": ["vray", "forestpack"],
+      "compatible": true
+    }
+  ],
+  "last_updated": "2026-04-07",
+  "note": "This matrix is validated by the Orchestrator before launching any VM"
+}
