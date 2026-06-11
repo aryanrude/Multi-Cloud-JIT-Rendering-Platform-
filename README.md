@@ -73,5 +73,5 @@ Built as a **conceptual DevOps / Cloud Engineering portfolio project** to demons
 
 ---
 
-**Made with ❤️ for learning and portfolio purposes**
+
 
