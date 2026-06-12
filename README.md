@@ -1,117 +1,77 @@
-# Multi-Cloud JIT Rendering Platform — Phase 1: Control Plane
+# Multi-Cloud-JIT-Rendering-Platform-
 
-A serverless control plane that validates software/render engine compatibility,
-tracks render jobs, and queues them for async VM provisioning.
+**A scalable, cost-optimized multi-cloud infrastructure for on-demand provisioning of 3D rendering environments.**
 
-## Architecture
+This project presents a production-grade architecture that allows users to dynamically provision 1 to 10,000 VMs with specific software (Maya, 3ds Max) + render engine (Arnold, Redshift, V-Ray) combinations across **AWS, GCP, and Azure** — **without maintaining 150+ golden images**.
 
-```
-User → API Gateway → Orchestrator Lambda → SQS → [Phase 2: VM provisioner]
-                  ↓
-              DynamoDB (compatibility matrix + job tracker)
-                  ↑
-         Callback Lambda ← VM reports ready
-```
+---
 
-## Prerequisites
+### Highlights
 
-- AWS CLI configured (`aws configure`)
-- Terraform >= 1.5 (`terraform -version`)
-- Python 3.10+ with `boto3` and `requests`
+- **Multi-Cloud Ready**: Full support for AWS, GCP, and Azure with thin abstraction layer
+- **Sub-5-Minute Provisioning**: Achieved through Just-In-Time (JIT) configuration
+- **Zero-Download Workflow**: Thin base images + high-speed network mounts
+- **Massive Cost Saving**: Eliminates 150+ VM images and uses Spot Instances by default
+- **Zero Egress/Ingress Charges**: All software assets stay inside the target cloud
+- **Highly Scalable**: Designed to handle 50+ concurrent users and up to 1,000 VMs
 
-## Deploy
+---
 
-```bash
-# 1. Init and apply
-cd terraform
-terraform init
-terraform apply
+### Architecture Overview
 
-# 2. Seed test data and run smoke tests
-cd ..
-pip install boto3 requests
-python scripts/seed_and_test.py
-```
+**Core Principle**: Just-In-Time (JIT) Configuration
 
-## Project structure
+- One **thin base OS image** per cloud (with pre-installed GPU drivers)
+- Regional high-performance shared storage:
+  - **AWS** → FSx for Lustre
+  - **GCP** → Filestore (NFS/Lustre protocol)
+  - **Azure** → Azure NetApp Files
+- Bootstrap Agent reads instance metadata → mounts required software → sets environment variables → sends READY callback
 
-```
-├── terraform/
-│   ├── main.tf          # Provider config
-│   ├── variables.tf     # Region, env, project name
-│   ├── dynamodb.tf      # Compatibility matrix + render jobs tables
-│   ├── sqs.tf           # Main queue + dead letter queue
-│   ├── iam.tf           # Least-privilege Lambda execution role
-│   ├── lambda.tf        # Function definitions + CloudWatch log groups
-│   ├── api_gateway.tf   # REST API: /provision and /callback
-│   └── outputs.tf       # Endpoint URLs and table names
-├── src/
-│   ├── orchestrator/handler.py   # Validate → write job → enqueue
-│   └── callback/handler.py      # VM ready → update job status
-└── scripts/
-    └── seed_and_test.py          # Seed DynamoDB + smoke test both endpoints
-```
+![High-Level Architecture](diagram-export-3-26-2026-3_14_48-PM.png)
 
-## API
+---
 
-### POST /provision
+### Key Design Decisions
 
-Submit a VM provisioning request.
+- Dynamic provisioning without per-combination golden images
+- DynamoDB-backed compatibility matrix for software + plugin validation
+- Metadata-driven Bootstrap Agent for zero manual intervention
+- Spot-First compute strategy with fallback to on-demand
+- Centralized shared library for instant version updates
 
-```json
-{
-  "software":       "blender",
-  "version":        "4.0",
-  "render_engine":  "cycles",
-  "engine_version": "4.0",
-  "machine_type":   "gpu-large",
-  "count":          2
-}
-```
+---
 
-Response:
-```json
-{
-  "status":     "queued",
-  "request_id": "abc-123",
-  "combo_id":   "blender-4.0-cycles-4.0"
-}
-```
+### Technology Stack
 
-### POST /callback
+- **Clouds**: AWS, GCP, Azure
+- **Orchestration**: Serverless (Step Functions / Cloud Workflows)
+- **Storage**: FSx for Lustre, Filestore, Azure NetApp Files
+- **Compute**: Spot Instances / Spot VMs
+- **Configuration**: Instance Metadata + Bootstrap Agent
+- **Monitoring**: Prometheus, Grafana, CloudWatch
 
-Called by Bootstrap Agent on the VM when it is ready.
+---
 
-```json
-{
-  "request_id":  "abc-123",
-  "status":      "ready",
-  "instance_id": "i-0abc123456789def0",
-  "cloud":       "aws"
-}
-```
+### Documents
 
-## Design decisions worth explaining in interviews
+- **[Full Architecture Design Document](assignment-multicloud-aryan-katiyar.pdf)**
+- **[High-Level Architecture Diagram](diagram-export-3-26-2026-3_14_48-PM.png)**
 
-**Why SQS between orchestrator and provisioner?**
-Decouples validation latency from VM launch latency. Orchestrator responds in
-< 100ms; actual VM launch can take 2-3 minutes. The queue also acts as a buffer
-if the provisioner falls behind.
+---
 
-**Why a Dead Letter Queue?**
-After 3 failed receive attempts, messages route to the DLQ automatically.
-This prevents hot messages from looping forever and gives a clear signal that
-something is wrong — check the DLQ before checking CloudWatch.
+### Why This Project Matters
 
-**Why `ConditionExpression` in the callback handler?**
-Prevents a late-arriving duplicate callback from overwriting a terminal `ready`
-state. Idempotency without a separate deduplication store.
+This architecture showcases real-world cloud engineering skills in:
+- Multi-cloud system design
+- Cost optimization at scale
+- High-performance shared storage patterns
+- Just-In-Time environment configuration
+- Reliability and observability principles
 
-**Why TTL on render_jobs?**
-Keeps the table lean without a cron job. Jobs auto-expire after 24 hours.
-For audit purposes, CloudWatch Logs retains all state transitions for 14 days.
+Built as a **conceptual DevOps / Cloud Engineering portfolio project** to demonstrate modern infrastructure thinking.
 
-## Next: Phase 2
+---
 
-Add EC2 Spot instance launch via an SQS consumer Lambda, Bootstrap Agent script,
-ElastiCache for config caching, and EventBridge for spot interruption handling.
+
+
