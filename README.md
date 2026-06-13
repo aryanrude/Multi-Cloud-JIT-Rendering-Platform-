@@ -69,8 +69,6 @@ This architecture showcases real-world cloud engineering skills in:
 - Just-In-Time environment configuration
 - Reliability and observability principles
 
-Built as a **conceptual DevOps / Cloud Engineering portfolio project** to demonstrate modern infrastructure thinking.
-
 ---
 
 
