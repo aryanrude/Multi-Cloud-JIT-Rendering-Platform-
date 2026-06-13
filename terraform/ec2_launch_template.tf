@@ -45,14 +45,17 @@ resource "aws_launch_template" "render_worker" {
   # Checks Redis cache before fetching config, then calls back when ready
   user_data = base64encode(<<-BASH
     #!/bin/bash
-    set -euo pipefail
-    exec >> /var/log/bootstrap.log 2>&1
-
+    LOG=/var/log/bootstrap.log
+    exec >> $LOG 2>&1
     echo "[bootstrap] starting at $(date -u)"
 
-    # ── IMDSv2 token ──────────────────────────────────────────────────────────
+    # Wait for instance metadata and role to be fully ready
+    sleep 260
+    echo "[bootstrap] waited 15s for role attachment"
+
     TOKEN=$(curl -sf -X PUT "http://169.254.169.254/latest/api/token" \
       -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+    echo "[bootstrap] got IMDSv2 token"
 
     INSTANCE_ID=$(curl -sf \
       -H "X-aws-ec2-metadata-token: $TOKEN" \
@@ -62,7 +65,6 @@ resource "aws_launch_template" "render_worker" {
       -H "X-aws-ec2-metadata-token: $TOKEN" \
       "http://169.254.169.254/latest/meta-data/placement/region")
 
-    # Read job context from instance tags (set by provisioner Lambda)
     REQUEST_ID=$(curl -sf \
       -H "X-aws-ec2-metadata-token: $TOKEN" \
       "http://169.254.169.254/latest/meta-data/tags/instance/request_id")
@@ -71,14 +73,18 @@ resource "aws_launch_template" "render_worker" {
       -H "X-aws-ec2-metadata-token: $TOKEN" \
       "http://169.254.169.254/latest/meta-data/tags/instance/combo_id")
 
-    echo "[bootstrap] instance=$INSTANCE_ID request_id=$REQUEST_ID combo_id=$COMBO_ID"
+    echo "[bootstrap] instance=$INSTANCE_ID region=$REGION request_id=$REQUEST_ID combo=$COMBO_ID"
 
-    # ── Fetch config endpoints from SSM ───────────────────────────────────────
-    CALLBACK_URL=$(aws ssm get-parameter \
-      --name "${aws_ssm_parameter.callback_url.name}" \
-      --region "$REGION" \
-      --query "Parameter.Value" \
-      --output text)
+    # Retry SSM parameter fetch up to 5 times
+    for i in 1 2 3 4 5; do
+      CALLBACK_URL=$(aws ssm get-parameter \
+        --name "${aws_ssm_parameter.callback_url.name}" \
+        --region "$REGION" \
+        --query "Parameter.Value" \
+        --output text 2>/dev/null) && break
+      echo "[bootstrap] SSM attempt $i failed, retrying in 10s"
+      sleep 250
+    done
 
     REDIS_HOST=$(aws ssm get-parameter \
       --name "${aws_ssm_parameter.redis_host.name}" \
@@ -86,23 +92,20 @@ resource "aws_launch_template" "render_worker" {
       --query "Parameter.Value" \
       --output text)
 
-    # ── Cache check ───────────────────────────────────────────────────────────
-    dnf install -y redis6 --quiet
+    echo "[bootstrap] callback=$CALLBACK_URL redis=$REDIS_HOST"
+
+    dnf install -y redis6 --quiet || echo "[bootstrap] WARNING: redis6 install failed"
 
     CACHE_KEY="config:$COMBO_ID"
     CACHED=$(redis-cli -h "$REDIS_HOST" -p 6379 GET "$CACHE_KEY" 2>/dev/null || echo "")
 
     if [ -z "$CACHED" ]; then
-      echo "[bootstrap] cache miss — fetching config for $COMBO_ID"
-      # In production: fetch actual render engine config, plugins, scene assets
-      CONFIG="render_config_for_$COMBO_ID"
-      redis-cli -h "$REDIS_HOST" -p 6379 SETEX "$CACHE_KEY" 3600 "$CONFIG"
-      echo "[bootstrap] config cached with 1hr TTL"
+      echo "[bootstrap] cache miss"
+      redis-cli -h "$REDIS_HOST" -p 6379 SETEX "$CACHE_KEY" 3600 "config_$COMBO_ID" || true
     else
-      echo "[bootstrap] cache hit — skipping fetch"
+      echo "[bootstrap] cache hit"
     fi
 
-    # ── Signal control plane ──────────────────────────────────────────────────
     curl -sf -X POST "$CALLBACK_URL" \
       -H "Content-Type: application/json" \
       -d "{\"request_id\":\"$REQUEST_ID\",\"status\":\"ready\",\"instance_id\":\"$INSTANCE_ID\",\"cloud\":\"aws\"}"

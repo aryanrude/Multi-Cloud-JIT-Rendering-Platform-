@@ -12,50 +12,48 @@ logger.setLevel(logging.INFO)
 dynamodb   = boto3.resource('dynamodb')
 sqs        = boto3.client('sqs')
 ec2_client = boto3.client('ec2')
+cloudwatch = boto3.client('cloudwatch')
 
 jobs_table = dynamodb.Table(os.environ['RENDER_JOBS_TABLE'])
 
 
-def lambda_handler(event, context):
-    """
-    Triggered by EventBridge when AWS sends an EC2 Spot Interruption Warning.
-    AWS gives ~2 minutes notice before terminating the instance.
+def _put_metric(name: str):
+    try:
+        cloudwatch.put_metric_data(
+            Namespace='JITRenderer',
+            MetricData=[{
+                'MetricName': name,
+                'Value': 1,
+                'Unit': 'Count',
+                'Dimensions': [{'Name': 'Environment', 'Value': os.environ.get('ENVIRONMENT', 'dev')}]
+            }]
+        )
+    except Exception:
+        logger.warning("Failed to emit metric %s", name)
 
-    Flow:
-      1. Get the interrupted instance's tags to find our request_id
-      2. Mark job as 'interrupted' in DynamoDB
-      3. Requeue to SQS so a new instance gets launched automatically
-    """
+
+def lambda_handler(event, context):
     logger.info("Spot interruption event: %s", json.dumps(event))
 
     instance_id = event.get('detail', {}).get('instance-id')
     if not instance_id:
-        logger.error("No instance-id in event — nothing to do")
+        logger.error("No instance-id in event detail")
         return
 
     request_id = get_instance_tag(instance_id, 'request_id')
     combo_id   = get_instance_tag(instance_id, 'combo_id')
 
     if not request_id:
-        logger.info(
-            "Instance %s has no request_id tag — not managed by us, ignoring",
-            instance_id
-        )
+        logger.info("Instance %s has no request_id tag — not managed by us", instance_id)
         return
 
-    logger.info(
-        "Spot interruption: instance=%s request_id=%s combo=%s",
-        instance_id, request_id, combo_id
-    )
+    logger.info("Spot interruption: instance=%s request_id=%s", instance_id, request_id)
 
     now = datetime.now(timezone.utc).isoformat()
 
-    # Step 1: mark interrupted in DynamoDB
     jobs_table.update_item(
         Key={'request_id': request_id},
-        UpdateExpression=(
-            "SET #s = :status, interrupted_at = :ts, interrupted_instance = :iid"
-        ),
+        UpdateExpression="SET #s = :status, interrupted_at = :ts, interrupted_instance = :iid",
         ExpressionAttributeNames={'#s': 'status'},
         ExpressionAttributeValues={
             ':status': 'interrupted',
@@ -64,7 +62,6 @@ def lambda_handler(event, context):
         }
     )
 
-    # Step 2: requeue — provisioner Lambda will re-fetch machine_type from DB
     sqs.send_message(
         QueueUrl=os.environ['QUEUE_URL'],
         MessageBody=json.dumps({
@@ -76,11 +73,13 @@ def lambda_handler(event, context):
         })
     )
 
-    logger.info("Requeued request_id=%s — new instance will be launched", request_id)
+    # Emit metric — visible in Grafana, triggers alerting if spikes
+    _put_metric('SpotInterruptions')
+
+    logger.info("Requeued request_id=%s after spot interruption", request_id)
 
 
 def get_instance_tag(instance_id: str, key: str) -> Optional[str]:
-    """Fetch a tag value from an EC2 instance. Returns None if not found."""
     try:
         resp = ec2_client.describe_instances(InstanceIds=[instance_id])
         tags = resp['Reservations'][0]['Instances'][0].get('Tags', [])

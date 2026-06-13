@@ -9,10 +9,27 @@ from boto3.dynamodb.conditions import Attr
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-dynamodb  = boto3.resource('dynamodb')
+dynamodb   = boto3.resource('dynamodb')
+cloudwatch = boto3.client('cloudwatch')
+
 jobs_table = dynamodb.Table(os.environ['RENDER_JOBS_TABLE'])
 
 VALID_STATUSES = {'provisioning', 'ready', 'failed'}
+
+
+def _put_metric(name: str):
+    try:
+        cloudwatch.put_metric_data(
+            Namespace='JITRenderer',
+            MetricData=[{
+                'MetricName': name,
+                'Value': 1,
+                'Unit': 'Count',
+                'Dimensions': [{'Name': 'Environment', 'Value': os.environ.get('ENVIRONMENT', 'dev')}]
+            }]
+        )
+    except Exception:
+        logger.warning("Failed to emit metric %s", name)
 
 
 def lambda_handler(event, context):
@@ -29,25 +46,22 @@ def lambda_handler(event, context):
         status      = body.get('status', 'ready')
         instance_id = body.get('instance_id', 'unknown')
         cloud       = body.get('cloud', 'unknown')
-        error_msg   = body.get('error')  # populated if status=failed
+        error_msg   = body.get('error')
 
         if not request_id:
             return _error(400, "Missing request_id")
 
         if status not in VALID_STATUSES:
-            return _error(400, f"Invalid status: {status}. Must be one of {VALID_STATUSES}")
+            return _error(400, f"Invalid status: {status}")
 
         now = datetime.now(timezone.utc).isoformat()
 
-        update_expr = (
-            "SET #s = :status, instance_id = :iid, cloud = :cloud, updated_at = :ts"
-        )
+        update_expr = "SET #s = :status, instance_id = :iid, cloud = :cloud, updated_at = :ts"
         expr_values = {
             ':status': status,
             ':iid':    instance_id,
             ':cloud':  cloud,
             ':ts':     now,
-            
         }
 
         if status == 'ready':
@@ -59,28 +73,26 @@ def lambda_handler(event, context):
         jobs_table.update_item(
             Key={'request_id': request_id},
             UpdateExpression=update_expr,
-            # Guard: don't overwrite a 'ready' job with a stale callback
             ConditionExpression=Attr('status').ne('ready'),
             ExpressionAttributeNames={'#s': 'status'},
             ExpressionAttributeValues=expr_values,
         )
 
-        logger.info(
-            "Updated request_id=%s status=%s instance=%s cloud=%s",
-            request_id, status, instance_id, cloud
-        )
+        # Emit metric only on meaningful state transitions
+        if status == 'ready':
+            _put_metric('JobsCompleted')
+        elif status == 'failed':
+            _put_metric('JobsFailed')
+
+        logger.info("Updated request_id=%s status=%s instance=%s cloud=%s",
+                    request_id, status, instance_id, cloud)
 
         return {
             'statusCode': 200,
-            'body': json.dumps({
-                'message':    'Status updated',
-                'request_id': request_id,
-                'status':     status,
-            })
+            'body': json.dumps({'message': 'Status updated', 'request_id': request_id, 'status': status})
         }
 
     except jobs_table.meta.client.exceptions.ConditionalCheckFailedException:
-        # Job already marked ready — idempotent, return 200
         logger.warning("Conditional check failed for request_id=%s — already ready", body.get('request_id'))
         return {
             'statusCode': 200,
